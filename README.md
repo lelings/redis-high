@@ -10,5 +10,6 @@
 
 #### 解决缓存击穿问题
 使用互斥锁机制重建缓存
+
 <img width="613" alt="image" src="https://github.com/lelings/redis-high/assets/104212137/490e9280-147e-4528-9875-774c723d106e">
 
