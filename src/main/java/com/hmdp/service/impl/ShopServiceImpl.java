@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
@@ -31,24 +32,50 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
+        Shop shop = queryWithLock(id);
+        if (shop == null) {
+            return Result.fail("店铺不存在");
+        }
+        return Result.ok(shop);
+    }
+
+    private Shop queryWithLock(Long id) {
         String key = RedisConstants.CACHE_SHOP_KEY + id;
         String shopJson = stringRedisTemplate.opsForValue().get(key);
         if (StrUtil.isNotBlank(shopJson)) {
             Shop shop = JSONUtil.toBean(shopJson, Shop.class);
-            return Result.ok(shop);
+            return shop;
         }
         if ("".equals(shopJson)) {
-            return Result.fail("店铺不存在");
+            return null;
+        }
+        Shop shop = null;
+        String lockKey = RedisConstants.LOCK_SHOP_KEY+id;
+        try {
+            boolean isLock = tryLock(lockKey);
+            if (!isLock) {
+                Thread.sleep(50);
+                return queryWithLock(id);
+            }
+
+
+            // 缓存未命中，查询数据库
+            shop = getById(id);
+
+            // 防止缓存穿透问题，存储空值
+            if (shop == null) {
+                stringRedisTemplate.opsForValue().set(key,"", RedisConstants.CACHE_NULL_TTL,TimeUnit.MINUTES);
+                return null;
+            }
+            String jsonStr = JSONUtil.toJsonStr(shop);
+            stringRedisTemplate.opsForValue().set(key,jsonStr,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally {
+            unlock(lockKey);
         }
 
-        Shop shop = getById(id);
-        if (shop == null) {
-            stringRedisTemplate.opsForValue().set(key,"", RedisConstants.CACHE_NULL_TTL,TimeUnit.MINUTES);
-            return Result.fail("店铺不存在");
-        }
-        String jsonStr = JSONUtil.toJsonStr(shop);
-        stringRedisTemplate.opsForValue().set(key,jsonStr,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        return Result.ok(shop);
+        return shop;
     }
 
     @Override
@@ -62,4 +89,16 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY+id);
         return Result.ok();
     }
+
+    private boolean tryLock(String key) {
+        Boolean lock = stringRedisTemplate.opsForValue().setIfAbsent(key, "1",
+                RedisConstants.LOCK_SHOP_TTL, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(lock);
+    }
+
+    private void unlock(String key) {
+        stringRedisTemplate.delete(key);
+    }
+
+
 }
