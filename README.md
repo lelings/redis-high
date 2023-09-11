@@ -13,3 +13,8 @@
 
 <img width="613" alt="image" src="https://github.com/lelings/redis-high/assets/104212137/490e9280-147e-4528-9875-774c723d106e">
 
+#### 解决秒杀问题
+通过lua脚本实现原子性操作，并通过缓存到redis中和使用异步进程处理订单信息，避免多次操作数据库，提高效率
+<img width="676" alt="image" src="https://github.com/lelings/redis-high/assets/104212137/a294ffa3-8c2e-4971-8c08-d52c00137c7d">
+
+
