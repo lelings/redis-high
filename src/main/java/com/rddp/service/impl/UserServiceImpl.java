@@ -3,6 +3,7 @@ package com.rddp.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.rddp.dto.LoginFormDTO;
@@ -13,7 +14,9 @@ import com.rddp.mapper.UserMapper;
 import com.rddp.service.IUserService;
 import com.rddp.utils.RedisConstants;
 import com.rddp.utils.RegexUtils;
+import com.rddp.utils.UserHolder;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +24,9 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -97,6 +102,50 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         stringRedisTemplate.expire(RedisConstants.LOGIN_USER_KEY+token,
                 Duration.ofSeconds(RedisConstants.LOGIN_USER_TTL));
         return Result.ok(token);
+    }
+
+    @Override
+    public Result sign() {
+        Long userId = UserHolder.getUser().getId();
+        LocalDateTime now = LocalDateTime.now();
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = RedisConstants.USER_SIGN_KEY + userId + keySuffix;
+        int dayOfMonth = now.getDayOfMonth();
+        Boolean success = stringRedisTemplate.opsForValue().setBit(key, dayOfMonth - 1, true);
+        if (BooleanUtil.isFalse(success)) {
+            return Result.fail("已经签过到了");
+        }
+        return Result.ok();
+    }
+
+    @Override
+    public Result singCount() {
+        Long userId = UserHolder.getUser().getId();
+        LocalDateTime now = LocalDateTime.now();
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = RedisConstants.USER_SIGN_KEY + userId + keySuffix;
+        int dayOfMonth = now.getDayOfMonth();
+        List<Long> result = stringRedisTemplate.opsForValue().bitField(key, BitFieldSubCommands
+                .create()
+                .get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0));
+
+        if (result == null || result.isEmpty()) {
+            return Result.ok(0);
+        }
+        Long signDays = result.get(0);
+        if (signDays == null || signDays == 0) {
+            return Result.ok(0);
+        }
+        int count = 0;
+        while (true) {
+            if ((signDays & 1) == 0) {
+                break;
+            }else {
+                count ++ ;
+            }
+            signDays >>>= 1;
+        }
+        return Result.ok(count);
     }
 
     private User createUserWithPhone(String phone) {
